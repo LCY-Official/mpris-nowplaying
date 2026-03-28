@@ -1,6 +1,4 @@
 var App = {};
-var userId = window.location.pathname.split('?')[0].substring(1);
-// var userId = '5b2e3e66f37dc906fc29d608';
 
 var container = document.getElementById('container');
 var currentAlbumCover = document.getElementById('album-current');
@@ -17,187 +15,67 @@ function timeoutPromise(dur) {
 }
 
 function makeSongName(item) {
-    return `${item.album && item.album.artists ? item.album.artists.map(a => a.name).join(', ') : 'Various Artists'} - ${item.name}`;
+    return `${item.artists.map(a => a.name).join(', ')} - ${item.name}`;
 }
 
 App.currentSong = '';
 App.currentCover = '';
-App.user = null;
-App.loadedCovers = {};
-App.waitingSocket = false;
-App.socketReady = false;
 App.open = false;
 App.firstAlbumLoad = true;
 App.scrollingSong = false;
 App.scrollingArtists = false;
 
-App.fetchUser = function() {
-    return fetch('https://spotify.aidenwallis.co.uk/user/details/' + userId)
+// 配置 - 可以修改代理服务器地址
+const MPRIS_API = 'http://localhost:3001/api/playing';
+
+App.checkSong = function() {
+    fetch(MPRIS_API)
         .then(function(response) {
-            if (response.status === 404) {
-                window.location = '/';
-                return;
-            }
-            if (response.status !== 200) {
-                return timeoutPromise(2000)
-                    .then(function() {
-                        return App.fetchUser();
-                    });
+            if (!response.ok) {
+                throw new Error('HTTP error ' + response.status);
             }
             return response.json();
         })
         .then(function(data) {
-            App.user = data;
-            return data;
-        })
-        .catch(function(error) {
-            return timeoutPromise(2000)
-                .then(function() {
-                    return App.fetchUser();
-                });
-        });
-};
-
-App.refreshToken = function() {
-    return fetch('https://spotify.aidenwallis.co.uk/user/refresh/' + userId, { method: 'POST' })
-        .then(function(response) {
-            if (response.status !== 200) {
-                return timeoutPromise(2000)
-                    .then(function() {
-                        return App.refreshToken();
-                    });
-            }
-            return response.json();
-        })
-        .then(function(json) {
-            if (!json.token) {
-                return timeoutPromise(2000)
-                    .then(function() {
-                        return App.refreshToken();
-                    });
-            }
-            App.user.token = json.token;
-            return App.checkSong();
-        })
-        .catch(function(error) {
-            return timeoutPromise(2000)
-                .then(function() {
-                    return App.refreshToken();
-                })
-        })
-
-}
-
-App.checkSong = function() {
-    if (App.user.clientPoll) {
-        return fetch('https://api.spotify.com/v1/me/player/currently-playing', {
-            headers: {
-                Authorization: `Bearer ${App.user.token}`,
-            }
-        })
-        .then(function(response) {
-            if (response.status === 401) {
-                return App.refreshToken();
-            }
-            if (response.status === 429) {
-                // Ratelimited. Wait till we're un-ratelimited
-                if (response.headers.has('Retry-After')) {
-                    const delay = parseInt(response.headers.get('Retry-After'));
-                    return timeoutPromise((delay) + (Math.floor(Math.random() * 6) + 1) * 1000) // Random padding.
-                        .then(function() {
-                            App.checkSong();
-                        });
-                }
-            }
-            if (response.status === 204) {
-                // No song playing.
+            setTimeout(function() {
+                App.checkSong();
+            }, 3000);
+            
+            if (!data.success || !data.data.playing || !data.data.song) {
                 if (App.open) {
                     App.close();
                 }
-                return timeoutPromise(10000)
-                    .then(function() {
-                        App.checkSong();
-                    });
+                return;
             }
-            return response.json().then(function(json) {
-                if (!json.item && !json.hasOwnProperty('is_playing')) {
-                    // Spotify API error.
-                    return timeoutPromise(10000)
-                        .then(function() {
-                            App.checkSong();
-                        });
-                }
-                if (!json.is_playing) {
-                    if (App.open) {
-                        App.close();
-                    }
-                } else {
-                    const albumImages = json.item.album.images.reduce(function(acc, cur) {
-                        acc[cur.height] = cur.url;
-                        return acc;
-                    }, {});
-                    const data = {
-                        songName: makeSongName(json.item),
-                        artists: json.item.artists,
-                        title: json.item.name,
-                        albumCover: albumImages[Math.max(...Object.keys(albumImages))],
-                    };
-                    if (App.open) {
-                        App.startUpdate(data);
-                    } else {
-                        App.openElement();
-                        return timeoutPromise(1200)
-                            .then(function() {
-                                App.startUpdate(data);
-                                return timeoutPromise(10000);
-                            }).then(function() {
-                                App.checkSong();
-                            });
-                    }
-                }
-                return timeoutPromise(10000).then(function() {
-                    App.checkSong();
-                });
-            });
+            
+            const song = data.data.song;
+            
+            const songData = {
+                songName: makeSongName(song),
+                artists: song.artists,
+                title: song.name,
+                albumCover: song.albumCover,
+            };
+            
+            if (!App.open) {
+                App.openElement();
+                setTimeout(function() {
+                    App.startUpdate(songData);
+                }, 1200);
+                return;
+            }
+            
+            App.startUpdate(songData);
         })
-        .catch(function(error) {
-            console.error(error);
-            return timeoutPromise(15000)
-                .then(function() {
-                    App.checkSong();
-                });
-        });
-    }
-    return fetch('https://spotify.aidenwallis.co.uk/u/' + userId + '?json=true&ts=' + Date.now())
-    .then(function(response) {
-        return response.json();
-    })
-    .then(function(data) {
-        setTimeout(function() {
-            App.checkSong();
-        }, 10 * 1000);
-        if (data.error) {
+        .catch(function(err) {
+            console.error('Error fetching now playing:', err);
             if (App.open) {
                 App.close();
             }
-            return;
-        }
-        if (!App.open) {
-            App.openElement();
             setTimeout(function() {
-                App.startUpdate(data);
-            }, 1200);
-            return;
-        }
-        App.startUpdate(data);
-    })
-    .catch(function(err) {
-        console.error(err);
-        return timeoutPromise(10 * 1000)
-            .then(function() {
                 App.checkSong();
-            });
-    });
+            }, 5000);
+        });
 };
 
 App.close = function() {
@@ -245,10 +123,10 @@ App.openElement = function() {
     setTimeout(function() {
         container.classList.add('active');
     }, 550);
-}
+};
 
 App.updateSongName = function(artists = [], name) {
-    const maxWidth = container.offsetWidth - 80; // padding for other shit
+    const maxWidth = container.offsetWidth - 80;
     artistsElement.classList.remove('active');
     setTimeout(function() {
         songName.classList.remove('active');
@@ -295,11 +173,23 @@ App.updateSongName = function(artists = [], name) {
 };
 
 App.updateCover = function(cover) {
-    newAlbumCover.src = cover;
+    if (!cover) {
+        return;
+    }
+    
+    newAlbumCover.onerror = function() {
+        newAlbumCover.classList.remove('active');
+        newAlbumCover.src = '';
+        if (App.firstAlbumLoad) {
+            App.firstAlbumLoad = false;
+        }
+    };
+    
     newAlbumCover.onload = function() {
         newAlbumCover.className += ' active';
         if (App.firstAlbumLoad) {
             currentAlbumCover.classList.add('active');
+            App.firstAlbumLoad = false;
         }
         setTimeout(function() {
             currentAlbumCover.src = cover;
@@ -307,34 +197,8 @@ App.updateCover = function(cover) {
             newAlbumCover.src = '';
         }, 450);
     };
-};
-
-App.transitionCover = function(cover) {
     
+    newAlbumCover.src = cover;
 };
 
-function playerError(error) {
-    console.error("Failed to initialize player", error);
-    window.location = '/';
-}
-
-function reloadPlayer(err) {
-    console.error(err);
-}
-
-//  
-
-// window.onSpotifyWebPlaybackSDKReady = function() {
-//     if (App.waitingSocket && App.user.socketable) {
-//         App.openSocket();
-//     }
-//     App.socketReady = true;
-// };
-
-App.start = function() {
-    App.fetchUser().then(function() {
-        App.checkSong();
-    });
-};
-
-App.start();
+App.checkSong();
