@@ -1,0 +1,26 @@
+{
+  "name": "mpris-nowplaying-proxy",
+  "version": "1.0.0",
+  "description": "MPRIS proxy for OBS now playing overlay",
+  "main": "mpris-proxy.js",
+  "scripts": {
+    "start": "node mpris-proxy.js",
+    "dev": "node mpris-proxy.js --debug",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mpris",
+    "obs",
+    "now-playing",
+    "yesplaymusic",
+    "spotify"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dbus-next": "^0.10.2",
+    "express": "^4.22.1"
+  },
+  "type": "commonjs"
+}
